@@ -214,7 +214,7 @@ server.registerTool(
   "submit_thought",
   {
     title: "Submit Sequential Thought",
-    description: "Submit a thought to the reasoning session. Core types: SEARCH_QUERY, SEARCH_EVAL, GROUNDED_CLAIM, CONSTRAINT_EVAL, WEB_RESEARCH_CAPTURE, SYNTHESIS. Strict validation rules apply based on the thoughtType. CRITICAL: You MUST wrap all unstructured deliberation in `<thinking>` tags BEFORE generating the JSON payload for this tool. Use this tool to structure your reasoning explicitly. If you need a custom type, use register_custom_thought_type first.",
+    description: "Submit a verifiably grounded reasoning step to the Sequential Thought DAG. WHY: Enforces a strict reasoning protocol that prevents hallucinations by requiring evidence chains. HOW: 1. Gather info (SEARCH_QUERY, WEB_RESEARCH_CAPTURE). 2. Evaluate (SEARCH_EVAL). 3. Extract facts (GROUNDED_CLAIM, requires quote/source metadata). 4. Prove constraints are met (CONSTRAINT_EVAL). 5. Conclude (SYNTHESIS). Chain steps using `dependsOn`. CRITICAL: Unstructured thinking MUST be inside `<thinking>` tags BEFORE calling this tool. If core types are insufficient, use `register_custom_thought_type` first.",
     inputSchema: SubmitThoughtInputSchema,
     annotations: {
       readOnlyHint: false,
