@@ -71,12 +71,12 @@ export const RegisterCustomThoughtTypeInputSchema = z.object({
   justification: z.string().describe("Metacognitive criteria: You must explicitly justify why the core thought types are insufficient, and what distinct grounding constraints this new type enforces.")
 }).strict();
 
-export const StoreDomainRulesetInputSchema = z.object({
+export const StoreDomainConstraintsInputSchema = z.object({
   domainId: z.string().describe("Unique identifier for this domain ruleset"),
   rulesetPayload: z.string().describe("The payload containing Hard Admissibility Constraints (HAC) and Localized Examples (L-ICL)")
 }).strict();
 
-export const FetchDomainRulesetInputSchema = z.object({
+export const ActivateDomainConstraintsInputSchema = z.object({
   sessionId: z.string().describe("The ID of the current reasoning session fetching the ruleset"),
   domainId: z.string().describe("The domain ruleset ID to retrieve")
 }).strict();
@@ -96,7 +96,7 @@ export const QueryDocumentInputSchema = z.object({
 export type SearchBlocksInput = z.infer<typeof SearchBlocksInputSchema>;
 export type SubmitThoughtInput = z.infer<typeof SubmitThoughtInputSchema>;
 export type RegisterCustomThoughtTypeInput = z.infer<typeof RegisterCustomThoughtTypeInputSchema>;
-export type StoreDomainRulesetInput = z.infer<typeof StoreDomainRulesetInputSchema>;
-export type FetchDomainRulesetInput = z.infer<typeof FetchDomainRulesetInputSchema>;
+export type StoreDomainConstraintsInput = z.infer<typeof StoreDomainConstraintsInputSchema>;
+export type ActivateDomainConstraintsInput = z.infer<typeof ActivateDomainConstraintsInputSchema>;
 export type StoreDocumentInput = z.infer<typeof StoreDocumentInputSchema>;
 export type QueryDocumentInput = z.infer<typeof QueryDocumentInputSchema>;

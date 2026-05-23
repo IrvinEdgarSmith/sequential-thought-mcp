@@ -2,13 +2,14 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
 import Ajv from "ajv";
 import { 
   SearchBlocksInputSchema, 
   SubmitThoughtInputSchema, 
   RegisterCustomThoughtTypeInputSchema,
-  StoreDomainRulesetInputSchema,
-  FetchDomainRulesetInputSchema,
+  StoreDomainConstraintsInputSchema,
+  ActivateDomainConstraintsInputSchema,
   StoreDocumentInputSchema,
   QueryDocumentInputSchema,
   ThoughtType 
@@ -26,15 +27,71 @@ const server = new McpServer({
 });
 
 // ==========================================
+// Subsystem 0: Guide & Progressive Disclosure
+// ==========================================
+
+const GUIDE_CONTENT = `
+# Sequential Thought Architecture Guide & Workflow
+
+## The Bigger Picture
+This server forces you to use a Directed Acyclic Graph (DAG) for reasoning to prevent hallucinations and "context stuffing". You cannot simply jump to a conclusion (SYNTHESIS). You must build a chain of evidence.
+
+## Core Rules & Execution Lineage
+1. **Gather Evidence**: Use \`SEARCH_QUERY\` or \`WEB_RESEARCH_CAPTURE\` to fetch data.
+2. **Evaluate Context**: Use \`SEARCH_EVAL\` to filter noise.
+3. **Ground Claims**: Extract hard facts using \`GROUNDED_CLAIM\`. This step requires explicit metadata pointing to the source (e.g. \`blockId\` or \`sourceUrl\`).
+4. **Enforce Constraints**: If a domain ruleset is active, you MUST prove your claims satisfy the rules using \`CONSTRAINT_EVAL\`.
+5. **Synthesize**: Conclude using \`SYNTHESIS\`. Every \`SYNTHESIS\` thought MUST use the \`dependsOn\` array to point to the IDs of the \`GROUNDED_CLAIM\`s or \`CONSTRAINT_EVAL\`s that support it.
+
+## The dependsOn Array
+This array establishes the DAG. If Thought B relies on Thought A, Thought B's \`dependsOn\` array must include Thought A's \`id\`.
+`;
+
+server.resource(
+  "guide",
+  "mcp://sequential-thought/guide",
+  { description: "The comprehensive architectural guide and workflow rules for using the Sequential Thought DAG." },
+  async (uri) => ({
+    contents: [{
+      uri: uri.href,
+      text: GUIDE_CONTENT
+    }]
+  })
+);
+
+server.registerTool(
+  "get_sequential_thought_guide",
+  {
+    title: "Get Sequential Thought Guide",
+    description: "Returns the comprehensive architectural guide, mental models, and workflow rules for using the Sequential Thought DAG. Call this immediately if you are unsure how to chain thoughts, what the core types mean, or how to pass validation gates.",
+    inputSchema: z.object({}).strict(),
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    }
+  },
+  async () => {
+    return {
+      content: [{ 
+        type: "text", 
+        text: GUIDE_CONTENT 
+      }]
+    };
+  }
+);
+
+// ==========================================
 // Subsystem 1: Context Staging (Key-Value Store)
 // ==========================================
 
 server.registerTool(
-  "store_domain_ruleset",
+  "store_domain_constraints",
   {
-    title: "Store Domain Ruleset",
-    description: "Store a domain-specific Hard Admissibility Constraint (HAC) and Localized ICL payload in the server memory.",
-    inputSchema: StoreDomainRulesetInputSchema,
+    title: "Store Domain Constraints (HAC)",
+    description: "Store Domain Constraints (HAC) for the current session. Use this to inject Hard Admissibility Constraints and Localized ICL payloads into the reasoning environment.",
+    inputSchema: StoreDomainConstraintsInputSchema,
     annotations: {
       readOnlyHint: false,
       destructiveHint: false,
@@ -54,11 +111,11 @@ server.registerTool(
 );
 
 server.registerTool(
-  "fetch_domain_ruleset",
+  "activate_domain_constraints",
   {
-    title: "Fetch Domain Ruleset",
-    description: "Retrieve a previously stored domain ruleset. Calling this injects the constraints into your context window and activates mandatory constraint quality gates for this session.",
-    inputSchema: FetchDomainRulesetInputSchema,
+    title: "Activate Domain Constraints",
+    description: "Activate Domain Constraints for the reasoning session. Use this to retrieve a stored ruleset. Calling this automatically activates mandatory constraint quality gates (CONSTRAINT_EVAL) before synthesis is permitted.",
+    inputSchema: ActivateDomainConstraintsInputSchema,
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
@@ -214,7 +271,7 @@ server.registerTool(
   "submit_thought",
   {
     title: "Submit Sequential Thought",
-    description: "Submit a verifiably grounded reasoning step to the Sequential Thought DAG. WHY: Enforces a strict reasoning protocol that prevents hallucinations by requiring evidence chains. HOW: 1. Gather info (SEARCH_QUERY, WEB_RESEARCH_CAPTURE). 2. Evaluate (SEARCH_EVAL). 3. Extract facts (GROUNDED_CLAIM, requires quote/source metadata). 4. Prove constraints are met (CONSTRAINT_EVAL). 5. Conclude (SYNTHESIS). Chain steps using `dependsOn`. CRITICAL: Unstructured thinking MUST be inside `<thinking>` tags BEFORE calling this tool. If core types are insufficient, use `register_custom_thought_type` first.",
+    description: "Submit a verifiably grounded reasoning step to the Sequential Thought DAG. Call get_sequential_thought_guide immediately if you are unfamiliar with this workflow or the required execution lineage (dependsOn).",
     inputSchema: SubmitThoughtInputSchema,
     annotations: {
       readOnlyHint: false,
@@ -230,7 +287,7 @@ server.registerTool(
     if (!(Object.values(ThoughtType) as string[]).includes(thoughtType)) {
       const customType = db.getCustomType(thoughtType);
       if (!customType) {
-        throw new Error(`Validation Error: Thought type '${thoughtType}' is not a core type and has not been registered. Valid core types are: SEARCH_QUERY, SEARCH_EVAL, GROUNDED_CLAIM, CONSTRAINT_EVAL, WEB_RESEARCH_CAPTURE, SYNTHESIS. If you need a custom type, use the register_custom_thought_type tool first.`);
+        throw new Error(`Validation Error: Thought type '${thoughtType}' is not a core type and has not been registered. Valid core types are: SEARCH_QUERY, SEARCH_EVAL, GROUNDED_CLAIM, CONSTRAINT_EVAL, WEB_RESEARCH_CAPTURE, SYNTHESIS. If you need a custom type, use the register_custom_thought_type tool first. If you are confused by this validation error, call the get_sequential_thought_guide tool for a complete explanation of the required workflow.`);
       }
       if (!extraMetadata) {
         throw new Error(`Validation Error: Custom thought type '${thoughtType}' requires an extraMetadata payload matching its registered schema.`);
@@ -250,20 +307,20 @@ server.registerTool(
       const hasWebSource = metadata?.sourceUrl;
       
       if (!hasBlockRef && !hasWebSource) {
-        throw new Error("Validation Error: GROUNDED_CLAIM requires either metadata.blockId (internal) or metadata.sourceUrl (web source).");
+        throw new Error("Validation Error: GROUNDED_CLAIM requires either metadata.blockId (internal) or metadata.sourceUrl (web source). If you are confused by this validation error, call the get_sequential_thought_guide tool for a complete explanation of the required workflow.");
       }
       
       // If grounding against an internal block, verify it exists and quote matches
       if (hasBlockRef) {
         const block = db.getBlock(sessionId, metadata!.blockId!);
         if (!block) {
-          throw new Error(`Validation Error: Block '${metadata!.blockId}' not found in session context.`);
+          throw new Error(`Validation Error: Block '${metadata!.blockId}' not found in session context. If you are confused by this validation error, call the get_sequential_thought_guide tool for a complete explanation of the required workflow.`);
         }
         if (!metadata?.quote) {
-          throw new Error("Validation Error: GROUNDED_CLAIM with blockId requires a verbatim metadata.quote string.");
+          throw new Error("Validation Error: GROUNDED_CLAIM with blockId requires a verbatim metadata.quote string. If you are confused by this validation error, call the get_sequential_thought_guide tool for a complete explanation of the required workflow.");
         }
         if (!block.content.includes(metadata.quote.trim())) {
-          throw new Error("Validation Error: Quote not found in referenced block. Ungrounded claim rejected.");
+          throw new Error("Validation Error: Quote not found in referenced block. Ungrounded claim rejected. If you are confused by this validation error, call the get_sequential_thought_guide tool for a complete explanation of the required workflow.");
         }
       }
       // Web-sourced claims just need the URL — the quote is optional but encouraged
@@ -277,7 +334,7 @@ server.registerTool(
       if (groundedClaims.length === 0 && webResearchCaptures.length === 0) {
         throw new Error(
           "Validation Error: SYNTHESIS blocked. You must retrieve and ground at least one claim " +
-          "(using GROUNDED_CLAIM or WEB_RESEARCH_CAPTURE) before synthesizing an answer."
+          "(using GROUNDED_CLAIM or WEB_RESEARCH_CAPTURE) before synthesizing an answer. If you are confused by this validation error, call the get_sequential_thought_guide tool for a complete explanation of the required workflow."
         );
       }
 
@@ -288,14 +345,14 @@ server.registerTool(
           throw new Error(
             "Validation Error: SYNTHESIS blocked. You have loaded a Domain Ruleset, which triggers mandatory " +
             "empirical quality gates. You must submit a CONSTRAINT_EVAL thought proving your claims " +
-            "obey the HAC (Hard Admissibility Constraints) before you are allowed to synthesize."
+            "obey the HAC (Hard Admissibility Constraints) before you are allowed to synthesize. If you are confused by this validation error, call the get_sequential_thought_guide tool for a complete explanation of the required workflow."
           );
         }
       }
 
       // 3. Execution Lineage (DAG) Gate
       if (!dependsOn || dependsOn.length === 0) {
-        throw new Error("Validation Error: SYNTHESIS requires a dependsOn array referencing previous thought IDs to establish execution lineage (DAG).");
+        throw new Error("Validation Error: SYNTHESIS requires a dependsOn array referencing previous thought IDs to establish execution lineage (DAG). If you are confused by this validation error, call the get_sequential_thought_guide tool for a complete explanation of the required workflow.");
       }
       
       const validIds = new Set(session.thoughts.map(t => t.id));
