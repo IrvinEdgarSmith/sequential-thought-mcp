@@ -23,9 +23,9 @@ RUN npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
 
 # Install supergateway globally in the production image
-RUN npm install -g @supergateway/server
+RUN npm install -g supergateway
 
 EXPOSE 8000
 
 # Wrap the stdio MCP server in Supergateway to expose it as an SSE HTTP endpoint
-ENTRYPOINT ["npx", "-y", "@supergateway/server", "--stdio", "node dist/index.js", "--port", "8000"]
+ENTRYPOINT ["npx", "-y", "supergateway", "--stdio", "node dist/index.js", "--port", "8000"]
