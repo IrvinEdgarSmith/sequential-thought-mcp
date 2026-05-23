@@ -27,5 +27,5 @@ RUN npm install -g supergateway
 
 EXPOSE 8000
 
-# Wrap the stdio MCP server in Supergateway to expose it as an SSE HTTP endpoint
-ENTRYPOINT ["npx", "-y", "supergateway", "--stdio", "node dist/index.js", "--port", "8000"]
+# Wrap the stdio MCP server in Supergateway to expose it as an HTTP endpoint
+ENTRYPOINT ["npx", "-y", "supergateway", "--stdio", "node dist/index.js", "--port", "8000", "--outputTransport", "streamableHttp"]
