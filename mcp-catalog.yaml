@@ -1,0 +1,6 @@
+services:
+  - id: sequential-thought-mcp
+    name: Sequential Thought MCP
+    type: server
+    image: sequential-thought-mcp:latest
+    description: "Secure, DAG-based Context Management & Reasoning Server with Information Subtraction."

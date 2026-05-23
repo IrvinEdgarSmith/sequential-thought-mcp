@@ -1,0 +1,268 @@
+#!/usr/bin/env node
+
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { 
+  SearchBlocksInputSchema, 
+  SubmitThoughtInputSchema, 
+  StoreDomainRulesetInputSchema,
+  FetchDomainRulesetInputSchema,
+  StoreDocumentInputSchema,
+  QueryDocumentInputSchema,
+  ThoughtType 
+} from "./types.js";
+import { db } from "./state.js";
+import { storeDocument, queryDocument } from "./rag.js";
+
+// Initialize MCP Server
+const server = new McpServer({
+  name: "sequential-thought-mcp",
+  version: "2.0.0" // V2 Migration (Empirical Anchor Compliance)
+});
+
+// ==========================================
+// Subsystem 1: Context Staging (Key-Value Store)
+// ==========================================
+
+server.registerTool(
+  "store_domain_ruleset",
+  {
+    title: "Store Domain Ruleset",
+    description: "Store a domain-specific Hard Admissibility Constraint (HAC) and Localized ICL payload in the server memory.",
+    inputSchema: StoreDomainRulesetInputSchema,
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async ({ domainId, rulesetPayload }) => {
+    db.storeDomainRuleset(domainId, rulesetPayload);
+    return {
+      content: [{ 
+        type: "text", 
+        text: `Domain ruleset '${domainId}' stored successfully.` 
+      }]
+    };
+  }
+);
+
+server.registerTool(
+  "fetch_domain_ruleset",
+  {
+    title: "Fetch Domain Ruleset",
+    description: "Retrieve a previously stored domain ruleset. Calling this injects the constraints into your context window and activates mandatory constraint quality gates for this session.",
+    inputSchema: FetchDomainRulesetInputSchema,
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async ({ sessionId, domainId }) => {
+    const text = db.getDomainRuleset(domainId);
+    if (!text) {
+      throw new Error(`Domain Ruleset '${domainId}' not found in server memory.`);
+    }
+    
+    // Mark the session as having an active domain ruleset, activating strict synthesis gates
+    db.setDomainRulesetActive(sessionId, true);
+    
+    return {
+      content: [{ 
+        type: "text", 
+        text: `[DOMAIN RULESET LOADED: ${domainId}]\n\n${text}\n\nWARNING: You have fetched a domain ruleset. You must now submit a CONSTRAINT_EVAL thought proving your plan obeys these constraints before you are allowed to SYNTHESIZE.` 
+      }]
+    };
+  }
+);
+
+
+// ==========================================
+// Subsystem 2: Sequential Thought Auditor
+// ==========================================
+
+server.registerTool(
+  "search_blocks",
+  {
+    title: "Search RAG Context Blocks",
+    description: "Simulates searching for RAG context blocks. Returns blocks with a blockId that must be referenced in GROUNDED_CLAIMs.",
+    inputSchema: SearchBlocksInputSchema,
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async ({ sessionId, query }) => {
+    const mockContent = `This is a simulated context block matching query: '${query}'. Real facts would be here.`;
+    const block = db.addBlock(sessionId, mockContent);
+    
+    return {
+      content: [{ 
+        type: "text", 
+        text: `Retrieved block ${block.blockId}. You must submit a SEARCH_EVAL thought before using this block.` 
+      }],
+      structuredContent: {
+        blockId: block.blockId,
+        content: block.content,
+        isRelevant: null
+      }
+    };
+  }
+);
+
+// ==========================================
+// Subsystem 3: Virtual Sub-Agent (Information Subtraction)
+// ==========================================
+
+server.registerTool(
+  "store_large_document",
+  {
+    title: "Store Large Document for Pruning",
+    description: "Store a massive document (e.g., PDF text) in the MCP's memory. Does not return the text to protect KV-cache.",
+    inputSchema: StoreDocumentInputSchema,
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async ({ sessionId, docId, content }) => {
+    storeDocument(sessionId, docId, content);
+    return {
+      content: [{ 
+        type: "text", 
+        text: `Document '${docId}' successfully chunked and stored in memory. Use query_document to extract information.` 
+      }]
+    };
+  }
+);
+
+server.registerTool(
+  "query_document",
+  {
+    title: "Query Document (Information Subtraction)",
+    description: "Queries a stored document using Information Subtraction. Returns only the most relevant chunks, pruning out the noise.",
+    inputSchema: QueryDocumentInputSchema,
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
+  },
+  async ({ sessionId, docId, query }) => {
+    const result = queryDocument(sessionId, docId, query);
+    return {
+      content: [{ 
+        type: "text", 
+        text: result 
+      }]
+    };
+  }
+);
+
+server.registerTool(
+  "submit_thought",
+  {
+    title: "Submit Sequential Thought",
+    description: "Submit a thought to the reasoning session. Strict validation rules apply based on the thoughtType. CRITICAL: You MUST wrap all unstructured deliberation in `<thinking>` tags BEFORE generating the JSON payload for this tool.",
+    inputSchema: SubmitThoughtInputSchema,
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true
+    }
+  },
+  async ({ sessionId, thoughtType, content, dependsOn, metadata }) => {
+    const session = db.getSession(sessionId);
+
+    // 1. Validation Gate: GROUNDED_CLAIM
+    if (thoughtType === ThoughtType.GROUNDED_CLAIM) {
+      if (!metadata?.blockId) {
+        throw new Error("Validation Error: GROUNDED_CLAIM requires metadata.blockId reference.");
+      }
+      
+      const block = db.getBlock(sessionId, metadata.blockId);
+      if (!block) {
+        throw new Error(`Validation Error: Block '${metadata.blockId}' not found in session context.`);
+      }
+      
+      if (!metadata?.quote) {
+        throw new Error("Validation Error: GROUNDED_CLAIM requires a verbatim metadata.quote string.");
+      }
+      
+      if (!block.content.includes(metadata.quote.trim())) {
+        throw new Error("Validation Error: Quote not found in referenced block. Ungrounded claim rejected.");
+      }
+    }
+    
+    // 2. Validation Gate: SYNTHESIS
+    if (thoughtType === ThoughtType.SYNTHESIS) {
+      const groundedClaims = db.getThoughtsByType(sessionId, ThoughtType.GROUNDED_CLAIM);
+      const webResearchCaptures = db.getThoughtsByType(sessionId, ThoughtType.WEB_RESEARCH_CAPTURE as ThoughtType);
+      
+      if (groundedClaims.length === 0 && webResearchCaptures.length === 0) {
+        throw new Error(
+          "Validation Error: SYNTHESIS blocked. You must retrieve and ground at least one claim " +
+          "(using GROUNDED_CLAIM or WEB_RESEARCH_CAPTURE) before synthesizing an answer."
+        );
+      }
+
+      // If a Domain Ruleset is active, enforce the CONSTRAINT_EVAL quality gate
+      if (session.domainRulesetActive) {
+        const constraintEvals = db.getThoughtsByType(sessionId, ThoughtType.CONSTRAINT_EVAL);
+        if (constraintEvals.length === 0) {
+          throw new Error(
+            "Validation Error: SYNTHESIS blocked. You have loaded a Domain Ruleset, which triggers mandatory " +
+            "empirical quality gates. You must submit a CONSTRAINT_EVAL thought proving your claims " +
+            "obey the HAC (Hard Admissibility Constraints) before you are allowed to synthesize."
+          );
+        }
+      }
+
+      // 3. Execution Lineage (DAG) Gate
+      if (!dependsOn || dependsOn.length === 0) {
+        throw new Error("Validation Error: SYNTHESIS requires a dependsOn array referencing previous thought IDs to establish execution lineage (DAG).");
+      }
+      
+      const validIds = new Set(session.thoughts.map(t => t.id));
+      for (const id of dependsOn) {
+        if (!validIds.has(id)) {
+          throw new Error(`Validation Error: dependsOn contains invalid or non-existent thought ID: ${id}`);
+        }
+      }
+    }
+
+    // Pass validation: Store thought
+    const thought = db.addThought(sessionId, thoughtType as ThoughtType, content, dependsOn || [], metadata);
+    
+    return {
+      content: [{ 
+        type: "text", 
+        text: `Thought ${thought.id} of type ${thoughtType} successfully accepted and stored.` 
+      }],
+      structuredContent: {
+        thought
+      }
+    };
+  }
+);
+
+// Main transport initialization
+async function runStdio() {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  console.error("Sequential Thought MCP server running via stdio");
+}
+
+runStdio().catch(error => {
+  console.error("Server error:", error);
+  process.exit(1);
+});
