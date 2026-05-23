@@ -214,7 +214,7 @@ server.registerTool(
   "submit_thought",
   {
     title: "Submit Sequential Thought",
-    description: "Submit a thought to the reasoning session. Strict validation rules apply based on the thoughtType. CRITICAL: You MUST wrap all unstructured deliberation in `<thinking>` tags BEFORE generating the JSON payload for this tool.",
+    description: "Submit a thought to the reasoning session. Core types: SEARCH_QUERY, SEARCH_EVAL, GROUNDED_CLAIM, CONSTRAINT_EVAL, WEB_RESEARCH_CAPTURE, SYNTHESIS. Strict validation rules apply based on the thoughtType. CRITICAL: You MUST wrap all unstructured deliberation in `<thinking>` tags BEFORE generating the JSON payload for this tool. Use this tool to structure your reasoning explicitly. If you need a custom type, use register_custom_thought_type first.",
     inputSchema: SubmitThoughtInputSchema,
     annotations: {
       readOnlyHint: false,
@@ -230,7 +230,7 @@ server.registerTool(
     if (!(Object.values(ThoughtType) as string[]).includes(thoughtType)) {
       const customType = db.getCustomType(thoughtType);
       if (!customType) {
-        throw new Error(`Validation Error: Thought type '${thoughtType}' is not a core type and has not been registered. Use register_custom_thought_type first.`);
+        throw new Error(`Validation Error: Thought type '${thoughtType}' is not a core type and has not been registered. Valid core types are: SEARCH_QUERY, SEARCH_EVAL, GROUNDED_CLAIM, CONSTRAINT_EVAL, WEB_RESEARCH_CAPTURE, SYNTHESIS. If you need a custom type, use the register_custom_thought_type tool first.`);
       }
       if (!extraMetadata) {
         throw new Error(`Validation Error: Custom thought type '${thoughtType}' requires an extraMetadata payload matching its registered schema.`);

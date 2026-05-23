@@ -45,15 +45,15 @@ export const SearchBlocksInputSchema = z.object({
 }).strict();
 
 export const SubmitThoughtInputSchema = z.object({
-  sessionId: z.string().describe("The ID of the current reasoning session"),
-  thoughtType: z.string().describe("The strict category of the thought (can be a core enum value or a registered custom type)"),
+  sessionId: z.string().describe("Unique identifier for the current reasoning session"),
+  thoughtType: z.string().describe("The strict category of the thought. Core types: SEARCH_QUERY, SEARCH_EVAL, GROUNDED_CLAIM, CONSTRAINT_EVAL, WEB_RESEARCH_CAPTURE, SYNTHESIS. If you need a different type, you MUST register it first using register_custom_thought_type."),
   content: z.string()
     .max(4000, "Content exceeds PTE budget limit of 4000 characters.")
     .refine(val => !/<\/?(system|tool_call|thinking|tool_response)>/i.test(val), {
       message: "Content rejected: Contains restricted structural XML tags."
     })
-    .describe("The actual reasoning or text of the thought"),
-  dependsOn: z.array(z.string()).optional().describe("Array of previous Thought IDs this thought relies on. Required to prove execution lineage for SYNTHESIS."),
+    .describe("The actual content or output of this reasoning step. MUST BE CONCISE and focused on the output, not the deliberation."),
+  dependsOn: z.array(z.string()).optional().describe("Array of prior thought IDs this step directly builds upon (DAG edges)"),
   metadata: z.object({
     blockId: z.string().optional().describe("Required for SEARCH_EVAL and GROUNDED_CLAIM (internal blocks)"),
     quote: z.string().optional().describe("Required for GROUNDED_CLAIM to prove grounding"),
