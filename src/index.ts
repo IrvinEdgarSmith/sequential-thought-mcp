@@ -2,9 +2,11 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import Ajv from "ajv";
 import { 
   SearchBlocksInputSchema, 
   SubmitThoughtInputSchema, 
+  RegisterCustomThoughtTypeInputSchema,
   StoreDomainRulesetInputSchema,
   FetchDomainRulesetInputSchema,
   StoreDocumentInputSchema,
@@ -13,6 +15,9 @@ import {
 } from "./types.js";
 import { db } from "./state.js";
 import { storeDocument, queryDocument } from "./rag.js";
+
+const AjvClass = Ajv as any;
+const ajv = new AjvClass();
 
 // Initialize MCP Server
 const server = new McpServer({
@@ -168,6 +173,44 @@ server.registerTool(
 );
 
 server.registerTool(
+  "register_custom_thought_type",
+  {
+    title: "Register Custom Thought Type",
+    description: "Registers a dynamic custom thought type with a JSON Schema blueprint. Once registered, it is locked and immutable.",
+    inputSchema: RegisterCustomThoughtTypeInputSchema,
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true
+    }
+  },
+  async ({ sessionId, typeName, schemaDefinition, justification }) => {
+    if (justification.length < 20) {
+      throw new Error("Validation Error: Justification is too short. You must explicitly justify why the core types are insufficient.");
+    }
+    
+    try {
+      ajv.compile(schemaDefinition);
+    } catch (e: any) {
+      throw new Error(`Validation Error: Invalid JSON Schema definition. ${e.message}`);
+    }
+
+    try {
+      const fingerprint = db.registerCustomType(typeName, schemaDefinition);
+      return {
+        content: [{ 
+          type: "text", 
+          text: `Custom thought type '${typeName}' successfully registered and locked with fingerprint [${fingerprint}]. You may now use it in submit_thought.` 
+        }]
+      };
+    } catch (e: any) {
+      throw new Error(e.message);
+    }
+  }
+);
+
+server.registerTool(
   "submit_thought",
   {
     title: "Submit Sequential Thought",
@@ -180,8 +223,25 @@ server.registerTool(
       openWorldHint: true
     }
   },
-  async ({ sessionId, thoughtType, content, dependsOn, metadata }) => {
+  async ({ sessionId, thoughtType, content, dependsOn, metadata, extraMetadata }) => {
     const session = db.getSession(sessionId);
+
+    // 0. Dynamic Custom Type Validation
+    if (!(Object.values(ThoughtType) as string[]).includes(thoughtType)) {
+      const customType = db.getCustomType(thoughtType);
+      if (!customType) {
+        throw new Error(`Validation Error: Thought type '${thoughtType}' is not a core type and has not been registered. Use register_custom_thought_type first.`);
+      }
+      if (!extraMetadata) {
+        throw new Error(`Validation Error: Custom thought type '${thoughtType}' requires an extraMetadata payload matching its registered schema.`);
+      }
+      
+      const validate = ajv.compile(customType.schema);
+      const valid = validate(extraMetadata);
+      if (!valid) {
+        throw new Error(`Validation Error: extraMetadata does not match the registered JSON Schema for '${thoughtType}'. Errors: ${ajv.errorsText(validate.errors)}`);
+      }
+    }
 
     // 1. Validation Gate: GROUNDED_CLAIM
     if (thoughtType === ThoughtType.GROUNDED_CLAIM) {
@@ -247,7 +307,7 @@ server.registerTool(
     }
 
     // Pass validation: Store thought
-    const thought = db.addThought(sessionId, thoughtType as ThoughtType, content, dependsOn || [], metadata);
+    const thought = db.addThought(sessionId, thoughtType, content, dependsOn || [], metadata, extraMetadata);
     
     return {
       content: [{ 

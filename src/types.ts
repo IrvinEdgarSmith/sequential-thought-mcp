@@ -19,7 +19,7 @@ export interface ContextBlock {
 export interface Thought {
   id: string;
   sessionId: string;
-  thoughtType: ThoughtType;
+  thoughtType: string;
   content: string;
   dependsOn: string[];
   metadata?: {
@@ -27,6 +27,7 @@ export interface Thought {
     quote?: string;
     sourceUrl?: string;
   };
+  extraMetadata?: Record<string, any>;
   timestamp: number;
 }
 
@@ -45,7 +46,7 @@ export const SearchBlocksInputSchema = z.object({
 
 export const SubmitThoughtInputSchema = z.object({
   sessionId: z.string().describe("The ID of the current reasoning session"),
-  thoughtType: z.nativeEnum(ThoughtType).describe("The strict category of the thought"),
+  thoughtType: z.string().describe("The strict category of the thought (can be a core enum value or a registered custom type)"),
   content: z.string()
     .max(4000, "Content exceeds PTE budget limit of 4000 characters.")
     .refine(val => !/<\/?(system|tool_call|thinking|tool_response)>/i.test(val), {
@@ -54,10 +55,20 @@ export const SubmitThoughtInputSchema = z.object({
     .describe("The actual reasoning or text of the thought"),
   dependsOn: z.array(z.string()).optional().describe("Array of previous Thought IDs this thought relies on. Required to prove execution lineage for SYNTHESIS."),
   metadata: z.object({
-    blockId: z.string().optional().describe("Required for SEARCH_EVAL and GROUNDED_CLAIM"),
+    blockId: z.string().optional().describe("Required for SEARCH_EVAL and GROUNDED_CLAIM (internal blocks)"),
     quote: z.string().optional().describe("Required for GROUNDED_CLAIM to prove grounding"),
-    sourceUrl: z.string().optional().describe("Source URL or citation for WEB_RESEARCH_CAPTURE")
-  }).optional().describe("Additional structured data required for specific thought types")
+    sourceUrl: z.string().optional().describe("Source URL or citation for WEB_RESEARCH_CAPTURE or external GROUNDED_CLAIM")
+  }).optional().describe("Additional structured data required for core thought types"),
+  extraMetadata: z.record(z.any()).optional().describe("Dynamic structured data payload matching the schema of a registered custom thought type")
+}).strict();
+
+export const RegisterCustomThoughtTypeInputSchema = z.object({
+  sessionId: z.string().describe("The ID of the current reasoning session"),
+  typeName: z.string()
+    .regex(/^[A-Z_]+$/, "Type name must be UPPERCASE_WITH_UNDERSCORES")
+    .describe("The name of the new thought type (e.g., RED_TEAM_CRITIQUE)"),
+  schemaDefinition: z.record(z.any()).describe("A valid JSON Schema object defining the required and optional fields for this thought type's extraMetadata payload"),
+  justification: z.string().describe("Metacognitive criteria: You must explicitly justify why the core thought types are insufficient, and what distinct grounding constraints this new type enforces.")
 }).strict();
 
 export const StoreDomainRulesetInputSchema = z.object({
@@ -84,6 +95,7 @@ export const QueryDocumentInputSchema = z.object({
 
 export type SearchBlocksInput = z.infer<typeof SearchBlocksInputSchema>;
 export type SubmitThoughtInput = z.infer<typeof SubmitThoughtInputSchema>;
+export type RegisterCustomThoughtTypeInput = z.infer<typeof RegisterCustomThoughtTypeInputSchema>;
 export type StoreDomainRulesetInput = z.infer<typeof StoreDomainRulesetInputSchema>;
 export type FetchDomainRulesetInput = z.infer<typeof FetchDomainRulesetInputSchema>;
 export type StoreDocumentInput = z.infer<typeof StoreDocumentInputSchema>;
