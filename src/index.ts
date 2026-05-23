@@ -300,7 +300,18 @@ server.registerTool(
       }
     }
 
-    // 1. Validation Gate: GROUNDED_CLAIM
+    // 1a. Validation Gate: SEARCH_EVAL
+    if (thoughtType === ThoughtType.SEARCH_EVAL) {
+      if (!metadata?.blockId) {
+        throw new Error("Validation Error: SEARCH_EVAL requires metadata.blockId to evaluate a specific context block. If you are confused by this validation error, call the get_sequential_thought_guide tool for a complete explanation of the required workflow.");
+      }
+      const block = db.getBlock(sessionId, metadata.blockId);
+      if (!block) {
+        throw new Error(`Validation Error: Block '${metadata.blockId}' not found in session context. If you are confused by this validation error, call the get_sequential_thought_guide tool for a complete explanation of the required workflow.`);
+      }
+    }
+
+    // 1b. Validation Gate: GROUNDED_CLAIM
     if (thoughtType === ThoughtType.GROUNDED_CLAIM) {
       // Two valid grounding paths: internal block reference OR external web source
       const hasBlockRef = metadata?.blockId;
@@ -350,11 +361,14 @@ server.registerTool(
         }
       }
 
-      // 3. Execution Lineage (DAG) Gate
+      // 3. SYNTHESIS Execution Lineage (DAG) Gate
       if (!dependsOn || dependsOn.length === 0) {
         throw new Error("Validation Error: SYNTHESIS requires a dependsOn array referencing previous thought IDs to establish execution lineage (DAG). If you are confused by this validation error, call the get_sequential_thought_guide tool for a complete explanation of the required workflow.");
       }
-      
+    }
+
+    // 4. Global Execution Lineage (DAG) Check
+    if (dependsOn && dependsOn.length > 0) {
       const validIds = new Set(session.thoughts.map(t => t.id));
       for (const id of dependsOn) {
         if (!validIds.has(id)) {
