@@ -2,9 +2,7 @@ version: '3.8'
 
 services:
   sequential-thought-mcp:
-    # IMPORTANT: Replace '<YOUR-GITHUB-USERNAME>' with your actual GitHub username or Docker Hub username
-    # Ensure this matches where you push the Docker image
-    image: ghcr.io/<YOUR-GITHUB-USERNAME>/sequential-thought-mcp:latest
+    build: .
     container_name: sequential-thought-mcp
     ports:
       - "8000:8000"
