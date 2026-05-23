@@ -185,28 +185,34 @@ server.registerTool(
 
     // 1. Validation Gate: GROUNDED_CLAIM
     if (thoughtType === ThoughtType.GROUNDED_CLAIM) {
-      if (!metadata?.blockId) {
-        throw new Error("Validation Error: GROUNDED_CLAIM requires metadata.blockId reference.");
+      // Two valid grounding paths: internal block reference OR external web source
+      const hasBlockRef = metadata?.blockId;
+      const hasWebSource = metadata?.sourceUrl;
+      
+      if (!hasBlockRef && !hasWebSource) {
+        throw new Error("Validation Error: GROUNDED_CLAIM requires either metadata.blockId (internal) or metadata.sourceUrl (web source).");
       }
       
-      const block = db.getBlock(sessionId, metadata.blockId);
-      if (!block) {
-        throw new Error(`Validation Error: Block '${metadata.blockId}' not found in session context.`);
+      // If grounding against an internal block, verify it exists and quote matches
+      if (hasBlockRef) {
+        const block = db.getBlock(sessionId, metadata!.blockId!);
+        if (!block) {
+          throw new Error(`Validation Error: Block '${metadata!.blockId}' not found in session context.`);
+        }
+        if (!metadata?.quote) {
+          throw new Error("Validation Error: GROUNDED_CLAIM with blockId requires a verbatim metadata.quote string.");
+        }
+        if (!block.content.includes(metadata.quote.trim())) {
+          throw new Error("Validation Error: Quote not found in referenced block. Ungrounded claim rejected.");
+        }
       }
-      
-      if (!metadata?.quote) {
-        throw new Error("Validation Error: GROUNDED_CLAIM requires a verbatim metadata.quote string.");
-      }
-      
-      if (!block.content.includes(metadata.quote.trim())) {
-        throw new Error("Validation Error: Quote not found in referenced block. Ungrounded claim rejected.");
-      }
+      // Web-sourced claims just need the URL — the quote is optional but encouraged
     }
     
     // 2. Validation Gate: SYNTHESIS
     if (thoughtType === ThoughtType.SYNTHESIS) {
       const groundedClaims = db.getThoughtsByType(sessionId, ThoughtType.GROUNDED_CLAIM);
-      const webResearchCaptures = db.getThoughtsByType(sessionId, ThoughtType.WEB_RESEARCH_CAPTURE as ThoughtType);
+      const webResearchCaptures = db.getThoughtsByType(sessionId, ThoughtType.WEB_RESEARCH_CAPTURE);
       
       if (groundedClaims.length === 0 && webResearchCaptures.length === 0) {
         throw new Error(
